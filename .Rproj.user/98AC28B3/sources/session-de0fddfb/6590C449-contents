@@ -1,0 +1,172 @@
+library(mvtnorm)
+library(parallel)
+
+set.seed(123)
+
+# ============================================================
+# Parameters
+# ============================================================
+n_obs <- 100      # Number of observations
+d <- 2            # Dimension
+N <- 1e6          # Number of posterior samples per Y
+M <- 100          # Number of different Y datasets
+
+# Mixture components (6 components on hexagon vertices)
+K <- 6
+radius <- 18      
+
+angles <- (0:(K-1)) * 2 * pi / K
+mu_matrix <- cbind(radius * cos(angles), radius * sin(angles))
+
+alpha_weights <- rep(1/K, K)
+
+# Covariance
+sigma_scalar <- 0.1
+Sigma <- sigma_scalar * diag(d)
+
+# Posterior variance
+sn <- 1 / (n_obs + 1)
+S_n_scalar <- sn * sigma_scalar
+
+# ============================================================
+# Helper function
+# ============================================================
+rowLogSumExps <- function(mat) {
+  m <- apply(mat, 1, max)
+  m + log(rowSums(exp(mat - m)))
+}
+
+# ============================================================
+# Generate posterior samples
+# ============================================================
+generate_posterior_samples <- function(N, mn_matrix, S_n_scalar, w_list, K, d) {
+  components <- sample(1:K, size = N, replace = TRUE, prob = w_list)
+  comp_counts <- tabulate(components, nbins = K)
+  samples <- matrix(0, nrow = N, ncol = d)
+  
+  for (k in 1:K) {
+    if (comp_counts[k] > 0) {
+      idx <- which(components == k)
+      samples[idx, ] <- rmvnorm(comp_counts[k], mean = mn_matrix[k, ], 
+                                sigma = S_n_scalar * diag(d))
+    }
+  }
+  return(samples)
+}
+
+# ============================================================
+# Log-posterior function (vectorized)
+# ============================================================
+log_post_vec <- function(theta_matrix, Y, sigma_scalar, alpha_weights, mu_matrix) {
+  N_samples <- nrow(theta_matrix)
+  n <- nrow(Y)
+  d <- ncol(theta_matrix)
+  K <- nrow(mu_matrix)
+  
+  # Log-likelihood
+  Y_sq <- rowSums(Y^2)
+  theta_sq <- rowSums(theta_matrix^2)
+  cross_term <- Y %*% t(theta_matrix)
+  sum_sq_dist <- sum(Y_sq) + n * theta_sq - 2 * colSums(cross_term)
+  
+  log_likelihood <- -0.5 * n * d * log(2 * pi * sigma_scalar) - 
+    0.5 * sum_sq_dist / sigma_scalar
+  
+  # Log-prior (mixture)
+  mu_sq <- rowSums(mu_matrix^2)
+  cross_prior <- theta_matrix %*% t(mu_matrix)
+  sq_dist_prior <- outer(theta_sq, mu_sq, "+") - 2 * cross_prior
+  
+  log_norm_const <- -0.5 * d * log(2 * pi * sigma_scalar)
+  log_priors <- log_norm_const - 0.5 * sq_dist_prior / sigma_scalar + 
+    matrix(log(alpha_weights), nrow = N_samples, ncol = K, byrow = TRUE)
+  
+  log_prior_density <- rowLogSumExps(log_priors)
+  
+  return(log_likelihood + log_prior_density)
+}
+
+# ============================================================
+# Compute posterior parameters and exact evidence
+# ============================================================
+compute_posterior_params <- function(Y, mu_matrix, alpha_weights, sigma_scalar, n_obs, d, K) {
+  Y_bar <- colMeans(Y)
+  sum_Y_sq <- sum(Y^2)
+  
+  mn_matrix <- (n_obs * matrix(Y_bar, nrow = K, ncol = d, byrow = TRUE) + mu_matrix) / (n_obs + 1)
+  
+  log_A_list <- log(alpha_weights) - (n_obs * d / 2) * log(2 * pi * sigma_scalar) - 
+    (d / 2) * log(n_obs + 1) -
+    0.5 * (sum_Y_sq + rowSums(mu_matrix^2)) / sigma_scalar +
+    0.5 * rowSums((n_obs * matrix(Y_bar, K, d, byrow = TRUE) + mu_matrix)^2) / (n_obs + 1) / sigma_scalar
+  
+  m <- max(log_A_list)
+  A_list <- exp(log_A_list - m)
+  w_list <- A_list / sum(A_list)
+  log_exact <- m + log(sum(A_list))
+  
+  list(mn_matrix = mn_matrix, w_list = w_list, log_exact = log_exact)
+}
+
+# ============================================================
+# Single replicate function
+# ============================================================
+run_single_Y <- function(seed_offset, N, mu_matrix, alpha_weights, sigma_scalar, 
+                         n_obs, d, K, S_n_scalar, Sigma) {
+  set.seed(123 + seed_offset)
+  
+  Y <- rmvnorm(n_obs, mean = rep(0, d), sigma = Sigma)
+  post_params <- compute_posterior_params(Y, mu_matrix, alpha_weights, sigma_scalar, n_obs, d, K)
+  samples <- generate_posterior_samples(N, post_params$mn_matrix, S_n_scalar, post_params$w_list, K, d)
+  lps <- log_post_vec(samples, Y, sigma_scalar, alpha_weights, mu_matrix)
+  
+  list(samples = samples, lps = lps, Y = Y, log_exact = post_params$log_exact)
+}
+
+# ============================================================
+# Main execution
+# ============================================================
+n_cores <- max(1, detectCores() - 1)
+
+if (.Platform$OS.type == "unix") {
+  results <- mclapply(1:M, function(m) {
+    run_single_Y(m, N, mu_matrix, alpha_weights, sigma_scalar,
+                 n_obs, d, K, S_n_scalar, Sigma)
+  }, mc.cores = n_cores)
+} else {
+  cl <- makeCluster(n_cores)
+  clusterExport(cl, c("N", "mu_matrix", "alpha_weights", "sigma_scalar",
+                      "n_obs", "d", "K", "S_n_scalar", "Sigma",
+                      "generate_posterior_samples", "log_post_vec",
+                      "compute_posterior_params", "run_single_Y", "rowLogSumExps"))
+  clusterEvalQ(cl, library(mvtnorm))
+  results <- parLapply(cl, 1:M, function(m) {
+    run_single_Y(m, N, mu_matrix, alpha_weights, sigma_scalar,
+                 n_obs, d, K, S_n_scalar, Sigma)
+  })
+  stopCluster(cl)
+}
+
+# Extract results
+all_samples <- lapply(results, function(x) x$samples)
+all_lps <- lapply(results, function(x) x$lps)
+all_Y <- lapply(results, function(x) x$Y)
+all_log_exact <- sapply(results, function(x) x$log_exact)
+
+# Save results
+gmm_2d_samples <- list(
+  samples = all_samples,
+  lps = all_lps,
+  Y = all_Y,
+  log_exact = all_log_exact,
+  n = n_obs,
+  d = d,
+  N = N,
+  M = M,
+  K = K,
+  mu_matrix = mu_matrix,
+  alpha_weights = alpha_weights,
+  sigma_scalar = sigma_scalar
+)
+
+save(gmm_2d_samples, file = sprintf("gmm%d_2d_multiple_Yn%d.RData", K, n_obs))

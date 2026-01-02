@@ -1,0 +1,22 @@
+# Configure your identity (if not done before)
+git config --global user.name "da-na-deri"
+git config --global user.email "naderidana@yahoo.com"
+```
+
+### 4. Create a `.gitignore` File
+
+In RStudio: **File → New File → Text File**, save as `.gitignore` in your project root with:
+  ```
+# RStudio files
+.Rproj.user/
+  .Rhistory
+.RData
+.Ruserdata
+
+# Large data files (optional - remove if you want to include them)
+*.RData
+rdata/*.RData
+
+# System files
+.DS_Store
+Thumbs.db
