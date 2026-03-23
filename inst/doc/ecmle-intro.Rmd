@@ -1,0 +1,82 @@
+---
+title: "Getting started with ECMLE"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Getting started with ECMLE}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+# Overview
+
+`ECMLE` implements **Elliptical Covering Marginal Likelihood Estimator**.
+The package is designed for settings where you have posterior draws, their
+log-posterior evaluations, and a function that can evaluate the log-posterior kernel away from the sampled points.
+
+# Minimal example
+
+```{r}
+set.seed(1)
+post_samples <- cbind(rnorm(400), rnorm(400))
+lps <- apply(post_samples, 1, function(z) sum(dnorm(z, log = TRUE)))
+log_post_fn <- function(theta) sum(dnorm(theta, log = TRUE))
+
+fit <- ECMLE::ecmle(
+  post_samples = post_samples,
+  lps = lps,
+  log_post_fn = log_post_fn,
+  hpd_level = 0.75,
+  seed = 123
+)
+
+fit
+summary(fit)
+```
+---
+title: "Getting started with ECMLE"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Getting started with ECMLE}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+# Overview
+
+`ECMLE` implements **Elliptical Covering Marginal Likelihood Estimator**.
+The package is designed for settings where you have posterior draws, their
+log-posterior evaluations, and a function that can evaluate the log-posterior kernel away from the sampled points.
+
+# Minimal example
+
+```{r}
+set.seed(1)
+post_samples <- cbind(rnorm(400), rnorm(400))
+lps <- apply(post_samples, 1, function(z) sum(dnorm(z, log = TRUE)))
+log_post_fn <- function(theta) sum(dnorm(theta, log = TRUE))
+
+fit <- ECMLE::ecmle(
+  post_samples = post_samples,
+  lps = lps,
+  log_post_fn = log_post_fn,
+  hpd_level = 0.75,
+  seed = 123
+)
+
+fit
+summary(fit)
+```
